@@ -429,6 +429,35 @@ export async function checkBrokenLinks(
   return wpFetch(`/wp-json/tww-agent/v1/content/${postId}/broken-links`);
 }
 
+export interface BulkSeoUpdate {
+  post_id: number;
+  title?: string;
+  description?: string;
+  focus_keyword?: string;
+}
+
+export interface BulkSeoResult {
+  success: boolean;
+  processed: number;
+  updated: number;
+  failed: number;
+  results: Array<{
+    post_id: number;
+    success: boolean;
+    updated?: { title?: string; description?: string; focus_keyword?: string };
+    error?: string;
+  }>;
+}
+
+export async function bulkUpdateSeoMeta(
+  updates: BulkSeoUpdate[]
+): Promise<BulkSeoResult> {
+  return wpFetch("/wp-json/tww-agent/v1/seo/bulk", {
+    method: "POST",
+    body: JSON.stringify({ updates }),
+  });
+}
+
 export interface Redirect {
   id: string;
   source: string;

@@ -21,6 +21,7 @@ import {
   listTerms,
   updateTermSeo,
   checkBrokenLinks,
+  bulkUpdateSeoMeta,
   WpError,
 } from "./wpClient.js";
 
@@ -550,6 +551,40 @@ export function registerTools(server: McpServer) {
     async ({ post_id }) => {
       try {
         const result = await checkBrokenLinks(post_id);
+        return textResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    }
+  );
+
+  server.registerTool(
+    "bulk_update_seo_meta",
+    {
+      title: "Bulk update Rank Math SEO fields",
+      description:
+        "Update Rank Math SEO title, meta description, and/or focus keyword for " +
+        "multiple posts in a single API call. Use this instead of calling " +
+        "update_seo_meta once per post — far more efficient and avoids hitting " +
+        "rate limits. Each item must include post_id and at least one field to change.",
+      inputSchema: {
+        updates: z
+          .array(
+            z.object({
+              post_id: z.number().int().positive().describe("The WordPress post or page ID"),
+              title: z.string().optional().describe("New Rank Math SEO title (~50-60 chars recommended)"),
+              description: z.string().optional().describe("New Rank Math meta description (~120-155 chars recommended)"),
+              focus_keyword: z.string().optional().describe("New Rank Math focus keyword"),
+            })
+          )
+          .min(1)
+          .max(100)
+          .describe("Array of updates. Each item needs post_id plus at least one field."),
+      },
+    },
+    async ({ updates }) => {
+      try {
+        const result = await bulkUpdateSeoMeta(updates);
         return textResult(result);
       } catch (err) {
         return errorResult(err);

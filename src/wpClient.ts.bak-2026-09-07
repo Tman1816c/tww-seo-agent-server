@@ -1,0 +1,298 @@
+import { config } from "./config.js";
+
+export class WpError extends Error {}
+
+function authHeader(): string {
+  const token = Buffer.from(
+    `${config.wp.username}:${config.wp.appPassword}`
+  ).toString("base64");
+  return `Basic ${token}`;
+}
+
+async function wpFetch<T = unknown>(
+  path: string,
+  init: RequestInit = {}
+): Promise<T> {
+  const url = `${config.wp.siteUrl}${path}`;
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      Authorization: authHeader(),
+      "Content-Type": "application/json",
+      ...(init.headers || {}),
+    },
+  });
+
+  const text = await res.text();
+  let body: unknown;
+  try {
+    body = text ? JSON.parse(text) : undefined;
+  } catch {
+    body = text;
+  }
+
+  if (!res.ok) {
+    const message =
+      body && typeof body === "object" && "message" in body
+        ? String((body as { message: unknown }).message)
+        : `WordPress request failed with HTTP ${res.status} ${res.statusText}`;
+    throw new WpError(`${message} (${init.method || "GET"} ${path})`);
+  }
+
+  return body as T;
+}
+
+export interface WpListedPost {
+  id: number;
+  title: { rendered: string };
+  slug: string;
+  status: string;
+  link: string;
+  modified: string;
+  type: string;
+}
+
+export interface PageSummary {
+  post_id: number;
+  title: string;
+  type: string;
+  status: string;
+  slug: string;
+  link: string;
+  modified: string;
+}
+
+export async function listPages(): Promise<PageSummary[]> {
+  const query =
+    "per_page=100&status=publish,draft,pending,future,private&context=edit&_fields=id,title,slug,status,link,modified,type";
+  const [pages, posts] = await Promise.all([
+    wpFetch<WpListedPost[]>(`/wp-json/wp/v2/pages?${query}`),
+    wpFetch<WpListedPost[]>(`/wp-json/wp/v2/posts?${query}`),
+  ]);
+
+  const toSummary = (p: WpListedPost): PageSummary => ({
+    post_id: p.id,
+    title: p.title?.rendered ?? "(untitled)",
+    type: p.type,
+    status: p.status,
+    slug: p.slug,
+    link: p.link,
+    modified: p.modified,
+  });
+
+  return [...pages, ...posts]
+    .map(toSummary)
+    .sort((a, b) => (a.modified < b.modified ? 1 : -1));
+}
+
+export interface ElementorField {
+  element_id: string;
+  widget_type: string;
+  field: string;
+  label: string;
+  value: string;
+  // "control": found via Elementor's own live widget control schema — safe
+  // to treat as a real, verified editable field.
+  // "heuristic": Elementor's registry couldn't resolve this widget type (e.g.
+  // it's from a deactivated theme/plugin), so this was guessed by scanning
+  // setting names — sanity-check the current value before overwriting it.
+  confidence: "control" | "heuristic";
+}
+
+export interface PageContent {
+  post_id: number;
+  title: string;
+  slug: string;
+  status: string;
+  link: string;
+  post_content: string;
+  seo: {
+    title: string;
+    description: string;
+    focus_keyword: string;
+  };
+  elements: ElementorField[];
+  is_elementor: boolean;
+}
+
+export async function getPageContent(postId: number): Promise<PageContent> {
+  return wpFetch<PageContent>(`/wp-json/tww-agent/v1/content/${postId}`);
+}
+
+export interface SeoUpdateFields {
+  title?: string;
+  description?: string;
+  focus_keyword?: string;
+}
+
+export async function updateSeoMeta(
+  postId: number,
+  fields: SeoUpdateFields
+): Promise<{ success: boolean; updated: SeoUpdateFields }> {
+  return wpFetch(`/wp-json/tww-agent/v1/content/${postId}/seo`, {
+    method: "POST",
+    body: JSON.stringify(fields),
+  });
+}
+
+export interface ElementorUpdateResult {
+  success: boolean;
+  post_id: number;
+  field: string;
+  value: string;
+  note: string;
+}
+
+export async function updateElementorText(
+  postId: number,
+  field: string,
+  value: string
+): Promise<ElementorUpdateResult> {
+  return wpFetch(`/wp-json/tww-agent/v1/content/${postId}/element`, {
+    method: "POST",
+    body: JSON.stringify({ field, value }),
+  });
+}
+
+export interface RestoreSnapshotResult {
+  success: boolean;
+  post_id: number;
+  link: string;
+  restored_from: string | null;
+}
+
+export async function restoreLastEdit(
+  postId: number
+): Promise<RestoreSnapshotResult> {
+  return wpFetch(`/wp-json/tww-agent/v1/content/${postId}/restore-snapshot`, {
+    method: "POST",
+  });
+}
+
+export interface DeleteResult {
+  success: boolean;
+  post_id: number;
+  link: string;
+  action: "trashed" | "permanently_deleted";
+  note?: string;
+}
+
+export async function deletePost(
+  postId: number,
+  force: boolean
+): Promise<DeleteResult> {
+  const query = force ? "?force=true" : "";
+  return wpFetch(`/wp-json/tww-agent/v1/content/${postId}${query}`, {
+    method: "DELETE",
+  });
+}
+
+export interface PostContentUpdateResult {
+  success: boolean;
+  post_id: number;
+  link: string;
+  changed: boolean;
+  old_length: number;
+  new_length: number;
+}
+
+export async function updatePostContent(
+  postId: number,
+  content: string
+): Promise<PostContentUpdateResult> {
+  return wpFetch(`/wp-json/tww-agent/v1/content/${postId}/post-content`, {
+    method: "POST",
+    body: JSON.stringify({ content }),
+  });
+}
+
+export interface PostDetailsUpdateResult {
+  success: boolean;
+  post_id: number;
+  title: string;
+  slug: string;
+  link: string;
+  changed: { title: boolean; slug: boolean };
+  slug_changed?: boolean;
+  old_link?: string;
+  note?: string;
+  slug_adjusted_by_wordpress?: boolean;
+}
+
+export interface PostDetailsFields {
+  title?: string;
+  slug?: string;
+}
+
+export async function updatePostDetails(
+  postId: number,
+  fields: PostDetailsFields
+): Promise<PostDetailsUpdateResult> {
+  const body: PostDetailsFields = {};
+  if (fields.title !== undefined) body.title = fields.title;
+  if (fields.slug !== undefined) body.slug = fields.slug;
+
+  return wpFetch(`/wp-json/tww-agent/v1/content/${postId}/details`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export interface Redirect {
+  id: string;
+  source: string;
+  target: string;
+  type: 301 | 302;
+  always: boolean;
+  hits: number;
+  created: string;
+}
+
+export async function listRedirects(): Promise<{
+  redirects: Redirect[];
+  count: number;
+}> {
+  return wpFetch(`/wp-json/tww-agent/v1/redirects`);
+}
+
+export async function createRedirect(input: {
+  source: string;
+  target: string;
+  type?: 301 | 302;
+  always?: boolean;
+}): Promise<{ success: boolean; redirect: Redirect; note: string }> {
+  return wpFetch(`/wp-json/tww-agent/v1/redirects`, {
+    method: "POST",
+    body: JSON.stringify({
+      source: input.source,
+      target: input.target,
+      type: input.type ?? 301,
+      always: input.always ?? false,
+    }),
+  });
+}
+
+export async function deleteRedirect(
+  redirectId: string
+): Promise<{ success: boolean; removed: Redirect; remaining: number }> {
+  return wpFetch(
+    `/wp-json/tww-agent/v1/redirects/${encodeURIComponent(redirectId)}`,
+    { method: "DELETE" }
+  );
+}
+
+export interface SearchMatch {
+  post_id: number;
+  title: string;
+  type: string;
+  link: string;
+  matched_in: string[];
+}
+
+export async function searchContent(
+  query: string
+): Promise<{ query: string; matches: SearchMatch[] }> {
+  return wpFetch(
+    `/wp-json/tww-agent/v1/search?q=${encodeURIComponent(query)}`
+  );
+}

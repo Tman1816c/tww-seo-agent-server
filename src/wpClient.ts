@@ -458,6 +458,26 @@ export async function bulkUpdateSeoMeta(
   });
 }
 
+export interface NoindexStatus {
+  post_id: number;
+  noindex: boolean;
+  robots: string[];
+}
+
+export async function getNoindexStatus(postId: number): Promise<NoindexStatus> {
+  return wpFetch(`/wp-json/tww-agent/v1/content/${postId}/noindex`);
+}
+
+export async function setNoindex(
+  postId: number,
+  noindex: boolean
+): Promise<{ success: boolean; post_id: number; noindex: boolean; robots: string[] }> {
+  return wpFetch(`/wp-json/tww-agent/v1/content/${postId}/noindex`, {
+    method: "POST",
+    body: JSON.stringify({ noindex }),
+  });
+}
+
 export interface Redirect {
   id: string;
   source: string;

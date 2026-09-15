@@ -22,6 +22,8 @@ import {
   updateTermSeo,
   checkBrokenLinks,
   bulkUpdateSeoMeta,
+  getNoindexStatus,
+  setNoindex,
   WpError,
 } from "./wpClient.js";
 
@@ -551,6 +553,49 @@ export function registerTools(server: McpServer) {
     async ({ post_id }) => {
       try {
         const result = await checkBrokenLinks(post_id);
+        return textResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    }
+  );
+
+  server.registerTool(
+    "get_noindex_status",
+    {
+      title: "Get noindex status of a page",
+      description:
+        "Check whether a post or page is set to noindex in Rank Math. Returns the current robots array so you can see the full directive (noindex, nofollow, etc.).",
+      inputSchema: {
+        post_id: z.number().int().positive().describe("The WordPress post or page ID"),
+      },
+    },
+    async ({ post_id }) => {
+      try {
+        const result = await getNoindexStatus(post_id);
+        return textResult(result);
+      } catch (err) {
+        return errorResult(err);
+      }
+    }
+  );
+
+  server.registerTool(
+    "set_noindex",
+    {
+      title: "Set noindex on a page",
+      description:
+        "Set or clear the Rank Math noindex directive on a post or page. " +
+        "Pass noindex: true to tell search engines not to index this page; " +
+        "false to make it indexable. This writes directly to the rank_math_robots post meta.",
+      inputSchema: {
+        post_id: z.number().int().positive().describe("The WordPress post or page ID"),
+        noindex: z.boolean().describe("true = noindex (hide from search engines), false = index (allow indexing)"),
+      },
+    },
+    async ({ post_id, noindex }) => {
+      try {
+        const result = await setNoindex(post_id, noindex);
         return textResult(result);
       } catch (err) {
         return errorResult(err);
